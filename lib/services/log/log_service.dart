@@ -38,14 +38,18 @@ class LogService {
   }
 
   /// Export logs to a file in the specified format.
-  Future<String> exportLogs(String filePath, LogExportFormat format) async {
+  Future<String> exportLogs(
+    String filePath,
+    LogExportFormat format, {
+    LogQuery? query,
+  }) async {
     try {
-      final LogQuery fullQuery = LogQuery(
-        limit: _maxEntries,
-        sortField: LogSortField.TIMESTAMP,
-        sortOrder: SortOrder.ASC,
+      final LogQuery exportQuery = (query ?? const LogQuery()).copyWith(
+        limit: query?.limit ?? _maxEntries,
+        sortField: query?.sortField ?? LogSortField.TIMESTAMP,
+        sortOrder: query?.sortOrder ?? SortOrder.ASC,
       );
-      final List<LogEntry> entries = await _repository.query(fullQuery);
+      final List<LogEntry> entries = await _repository.query(exportQuery);
 
       String content;
       switch (format) {
@@ -71,6 +75,34 @@ class LogService {
   Future<void> archiveAndClean() async {
     try {
       await _cleanupWorker.checkAndCleanup();
+    } catch (_) {}
+  }
+
+  /// Archive current logs and then clear the log database.
+  Future<void> clearLogs() async {
+    try {
+      final int count = await _repository.count();
+      if (count > 0) {
+        try {
+          final String baseDir = await FileUtils.getAppDocumentsPath();
+          final String archiveDir = '$baseDir/ble_logs/archive';
+          final String archivePath = await FileUtils.generateArchivePath(
+            archiveDir,
+            'ble_logs_clear_archive',
+            'txt',
+          );
+          await exportLogs(
+            archivePath,
+            LogExportFormat.TXT,
+            query: LogQuery(
+              limit: _maxEntries,
+              sortField: LogSortField.TIMESTAMP,
+              sortOrder: SortOrder.ASC,
+            ),
+          );
+        } catch (_) {}
+      }
+      await _repository.deleteAll();
     } catch (_) {}
   }
 

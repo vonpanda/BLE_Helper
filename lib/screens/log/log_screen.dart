@@ -23,16 +23,15 @@ class LogScreen extends StatefulWidget {
 class _LogScreenState extends State<LogScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late final LogBloc _logBloc;
   LogEventType? _selectedEventType;
 
   @override
   void initState() {
     super.initState();
+    _logBloc = sl<LogBloc>()..add(const LogsRequested());
     _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<LogBloc>().add(const LogsRequested());
-    });
   }
 
   void _onTabChanged() {
@@ -61,17 +60,18 @@ class _LogScreenState extends State<LogScreen>
   }
 
   void _refreshLogs() {
-    context.read<LogBloc>().add(
-          LogFilterChanged(
-            query: LogQuery(eventType: _selectedEventType),
-          ),
-        );
+    _logBloc.add(
+      LogFilterChanged(
+        query: LogQuery(eventType: _selectedEventType),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _logBloc.close();
     super.dispose();
   }
 
@@ -79,8 +79,8 @@ class _LogScreenState extends State<LogScreen>
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
 
-    return BlocProvider<LogBloc>(
-      create: (_) => sl<LogBloc>(),
+    return BlocProvider<LogBloc>.value(
+      value: _logBloc,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Logs'),
@@ -185,7 +185,7 @@ class _LogScreenState extends State<LogScreen>
           FilledButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              context.read<LogBloc>().add(const ClearLogs());
+              _logBloc.add(const ClearLogs());
             },
             child: const Text('Clear'),
           ),
@@ -198,14 +198,14 @@ class _LogScreenState extends State<LogScreen>
     showDialog(
       context: context,
       builder: (_) => BlocProvider<LogBloc>.value(
-        value: context.read<LogBloc>(),
+        value: _logBloc,
         child: const LogExportDialog(),
       ),
     ).then((_) {
       if (!context.mounted) {
         return;
       }
-      final LogState state = context.read<LogBloc>().state;
+      final LogState state = _logBloc.state;
       if (state.exportStatus == LogExportStatus.completed &&
           state.exportFilePath != null) {
         Share.shareXFiles(

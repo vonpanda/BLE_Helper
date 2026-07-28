@@ -45,6 +45,7 @@ void main() {
     when(() => mockRepo.query(any())).thenAnswer((_) async => [testEntry]);
     when(() => mockRepo.count()).thenAnswer((_) async => 10);
     when(() => mockRepo.totalSize()).thenAnswer((_) async => 3000);
+    when(() => mockRepo.deleteAll()).thenAnswer((_) async => 10);
     when(() => mockRepo.getStats()).thenAnswer((_) async => testStats);
   });
 
@@ -103,6 +104,38 @@ void main() {
       );
       await service.archiveAndClean();
       verify(() => mockCleanupWorker.checkAndCleanup()).called(1);
+    });
+
+    test('should export logs using the supplied query', () async {
+      final service = LogService(
+        repository: mockRepo,
+        cleanupWorker: mockCleanupWorker,
+      );
+      const query = LogQuery(
+        eventType: LogEventType.GATT_WRITE,
+        limit: 25,
+      );
+
+      await service.exportLogs('/tmp/ble_logs.csv', LogExportFormat.CSV,
+          query: query);
+
+      final captured = verify(() => mockRepo.query(captureAny()))
+          .captured
+          .single as LogQuery;
+      expect(captured.eventType, LogEventType.GATT_WRITE);
+      expect(captured.limit, 25);
+    });
+
+    test('should clear logs after archiving existing entries', () async {
+      final service = LogService(
+        repository: mockRepo,
+        cleanupWorker: mockCleanupWorker,
+      );
+
+      await service.clearLogs();
+
+      verify(() => mockRepo.count()).called(greaterThanOrEqualTo(1));
+      verify(() => mockRepo.deleteAll()).called(1);
     });
 
     test('should silently handle archive error', () async {

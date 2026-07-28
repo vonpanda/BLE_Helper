@@ -73,6 +73,7 @@ class LogBloc extends Bloc<LogEvent, LogState> {
       final String resultPath = await _logService.exportLogs(
         filePath,
         event.format,
+        query: event.query,
       );
 
       emit(state.copyWith(
@@ -92,7 +93,7 @@ class LogBloc extends Bloc<LogEvent, LogState> {
     Emitter<LogState> emit,
   ) async {
     try {
-      await _logService.archiveAndClean();
+      await _logService.clearLogs();
       final List<LogEntry> entries = await _logService.query(state.query);
       final LogStats stats = await _logService.getStats();
       emit(state.copyWith(

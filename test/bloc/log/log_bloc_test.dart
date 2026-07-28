@@ -44,7 +44,9 @@ void main() {
         .thenAnswer((_) async => [testEntry]);
     when(() => mockLogService.getStats()).thenAnswer((_) async => testStats);
     when(() => mockLogService.archiveAndClean()).thenAnswer((_) async {});
-    when(() => mockLogService.exportLogs(any(), any()))
+    when(() => mockLogService.clearLogs()).thenAnswer((_) async {});
+    when(() =>
+            mockLogService.exportLogs(any(), any(), query: any(named: 'query')))
         .thenAnswer((_) async => '/tmp/export.txt');
   });
 
@@ -144,7 +146,7 @@ void main() {
             .having((s) => s.stats, 'stats not null', isNotNull),
       ],
       verify: (_) {
-        verify(() => mockLogService.archiveAndClean()).called(1);
+        verify(() => mockLogService.clearLogs()).called(1);
       },
     );
 
@@ -152,7 +154,7 @@ void main() {
       'should handle ClearLogs error gracefully',
       build: () => LogBloc(logService: mockLogService),
       setUp: () {
-        when(() => mockLogService.archiveAndClean())
+        when(() => mockLogService.clearLogs())
             .thenThrow(Exception('Cleanup failed'));
       },
       act: (bloc) => bloc.add(const ClearLogs()),
