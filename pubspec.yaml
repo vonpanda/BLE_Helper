@@ -1,7 +1,7 @@
 name: ble_helper
 description: BLE Bluetooth Helper App — scan, connect, GATT interact, and DFU upgrade.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.5.0
