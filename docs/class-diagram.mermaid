@@ -1,0 +1,585 @@
+classDiagram
+    direction TB
+
+    %% ========== Domain Models ==========
+    class BleDevice {
+        +String id
+        +String name
+        +String macAddress
+        +int rssi
+        +DateTime lastSeen
+        +bool isConnected
+        +bool isFavorite
+        +AdvertisementData? advData
+        +fromScanResult(r) BleDevice
+        +toJson() Map~String,dynamic~
+    }
+
+    class AdvertisementData {
+        +String? localName
+        +int? txPowerLevel
+        +bool isConnectable
+        +int? manufacturerId
+        +List~int~ manufacturerData
+        +Map~int,List~int~~ serviceData
+        +List~String~ serviceUuids
+        +Map~String,List~int~~ parsedStructures
+        +parse(List~int~ raw) AdvertisementData
+    }
+
+    class BleServiceInfo {
+        +String uuid
+        +String deviceId
+        +bool isPrimary
+        +List~BleCharacteristicInfo~ characteristics
+    }
+
+    class BleCharacteristicInfo {
+        +String uuid
+        +String serviceUuid
+        +String deviceId
+        +CharacteristicProperties properties
+        +List~int~? lastReadValue
+        +List~int~? lastNotifyValue
+        +bool isNotifying
+        +bool isIndicating
+        +List~BleDescriptorInfo~ descriptors
+    }
+
+    class CharacteristicProperties {
+        +bool read
+        +bool write
+        +bool writeWithoutResponse
+        +bool notify
+        +bool indicate
+    }
+
+    class BleDescriptorInfo {
+        +String uuid
+        +String characteristicUuid
+        +String deviceId
+        +List~int~? value
+    }
+
+    class ScanFilter {
+        +String? nameFilter
+        +String? macFilter
+        +int? rssiMin
+        +SortBy sortBy
+        +SortOrder sortOrder
+    }
+
+    class ConnectionParams {
+        +int mtu
+        +int intervalMs
+        +int latency
+        +int supervisionTimeoutMs
+    }
+
+    class LogEntry {
+        +int id
+        +DateTime timestamp
+        +String deviceId
+        +String? deviceName
+        +LogEventType eventType
+        +LogDirection? direction
+        +String? serviceUuid
+        +String? characteristicUuid
+        +String? dataHex
+        +String description
+        +String? errorDetail
+    }
+
+    class DfuFirmware {
+        +String filePath
+        +String fileName
+        +int fileSize
+        +DfuChipType chipType
+        +String firmwareVersion
+        +bool isValid
+    }
+
+    class AppSettings {
+        +ThemeMode themeMode
+        +DataDisplayFormat defaultFormat
+        +int scanDurationSeconds
+        +bool autoReconnect
+        +int logRetentionDays
+        +bool enableAutoArchive
+    }
+
+    %% ========== Enums ==========
+    class LogEventType {
+        <<enumeration>>
+        SCAN_DEVICE_FOUND
+        DEVICE_CONNECTED
+        DEVICE_DISCONNECTED
+        GATT_READ
+        GATT_WRITE
+        GATT_NOTIFY
+        GATT_INDICATE
+        MTU_CHANGED
+        ERROR
+        DFU_STARTED
+        DFU_PROGRESS
+        DFU_COMPLETED
+    }
+
+    class LogDirection {
+        <<enumeration>>
+        TX
+        RX
+    }
+
+    class SortBy {
+        <<enumeration>>
+        RSSI
+        NAME
+        LAST_SEEN
+    }
+
+    class SortOrder {
+        <<enumeration>>
+        ASC
+        DESC
+    }
+
+    class DataDisplayFormat {
+        <<enumeration>>
+        HEX
+        ASCII
+        DEC
+        BIN
+    }
+
+    class DfuChipType {
+        <<enumeration>>
+        NORDIC
+        TI
+        DIALOG
+        CUSTOM
+    }
+
+    %% ========== Relationships ==========
+    BleDevice "1" --> "0..1" AdvertisementData : contains
+    BleServiceInfo "1" --> "*" BleCharacteristicInfo : contains
+    BleCharacteristicInfo "1" --> "0..*" BleDescriptorInfo : contains
+    BleCharacteristicInfo "1" --> "1" CharacteristicProperties : has
+    LogEntry --> LogEventType : uses
+    LogEntry --> LogDirection : uses
+    ScanFilter --> SortBy : uses
+    ScanFilter --> SortOrder : uses
+    DfuFirmware --> DfuChipType : uses
+    AppSettings --> DataDisplayFormat : uses
+
+---
+title: 服务层接口
+---
+classDiagram
+    direction TB
+
+    %% ========== BLE Service Interface ==========
+    class IBleService {
+        <<interface>>
+        +Stream~List~BleDevice~~ scanDevices(ScanFilter? filter) Stream
+        +Future~void~ stopScan()
+        +Future~void~ connect(String deviceId)
+        +Future~void~ disconnect(String deviceId)
+        +Future~List~BleServiceInfo~~ discoverServices(String deviceId)
+        +Future~List~int~~ readCharacteristic(String deviceId, String serviceUuid, String charUuid)
+        +Future~void~ writeCharacteristic(String deviceId, String serviceUuid, String charUuid, List~int~ data, bool withResponse)
+        +Future~void~ setNotify(String deviceId, String serviceUuid, String charUuid, bool enable)
+        +Future~int~ requestMtu(String deviceId, int mtu)
+        +Stream~int~~ observeRssi(String deviceId)
+        +Stream~ConnectionState~~ observeConnection(String deviceId)
+        +Future~List~int~~ readDescriptor(String deviceId, String serviceUuid, String charUuid, String descUuid)
+        +Future~void~ writeDescriptor(String deviceId, String serviceUuid, String charUuid, String descUuid, List~int~ data)
+        +Stream~List~BleCharacteristicInfo~~ observeNotifyValue(String deviceId, String serviceUuid, String charUuid)
+    }
+
+    class BleService {
+        -FlutterBluePlus _flutterBlue
+        -Map~String, BluetoothDevice~ _connectedDevices
+        -Map~String, StreamSubscription~ _notifySubscriptions
+        +BleService()
+        +all methods from IBleService
+    }
+
+    class BleDeviceManager {
+        -BleService _bleService
+        -Map~String, BleGattOperator~ _gattOperators
+        -int _maxConcurrentDevices
+        +connect(String deviceId)
+        +disconnect(String deviceId)
+        +getOperator(String deviceId) BleGattOperator
+        +getConnectedDeviceIds() List~String~
+        +isConnected(String deviceId) bool
+    }
+
+    class BleGattOperator {
+        -String _deviceId
+        -Queue~GattOperation~ _operationQueue
+        -bool _isProcessing
+        +enqueueRead(String serviceUuid, String charUuid)
+        +enqueueWrite(String serviceUuid, String charUuid, List~int~ data, bool withResponse)
+        +enqueueSetNotify(String serviceUuid, String charUuid, bool enable)
+        +enqueueReadDescriptor(String serviceUuid, String charUuid, String descUuid)
+        +dispose()
+    }
+
+    %% ========== DFU Interface ==========
+    class IDfuAdapter {
+        <<interface>>
+        +bool isSupported(DfuChipType chipType)
+        +DfuChipType get chipType
+        +Future~void~ startDfu(String deviceId, DfuFirmware firmware)
+        +Future~void~ abortDfu()
+        +Stream~DfuProgress~~ observeProgress()
+        +Stream~DfuState~~ observeState()
+    }
+
+    class NordicDfuAdapter {
+        -FlutterNordicDfu _nordicDfu
+        +isSupported(DfuChipType chipType) bool
+        +DfuChipType get chipType
+        +startDfu(String deviceId, DfuFirmware firmware)
+        +abortDfu()
+        +observeProgress() Stream~DfuProgress~
+        +observeState() Stream~DfuState~
+    }
+
+    class DfuManager {
+        -List~IDfuAdapter~ _adapters
+        -IDfuAdapter? _activeAdapter
+        +registerAdapter(IDfuAdapter adapter)
+        +getAdapterFor(DfuChipType chipType) IDfuAdapter?
+        +startDfu(String deviceId, DfuFirmware firmware)
+        +abortDfu()
+        +observeProgress() Stream~DfuProgress~
+    }
+
+    class DfuProgress {
+        +int percent
+        +int bytesSent
+        +int totalBytes
+        +double speedKbps
+    }
+
+    class DfuState {
+        <<enumeration>>
+        IDLE
+        CONNECTING
+        UPLOADING
+        VERIFYING
+        COMPLETED
+        FAILED
+        ABORTED
+    }
+
+    %% ========== Log Service ==========
+    class ILogService {
+        <<interface>>
+        +Future~void~ log(LogEntry entry)
+        +Future~List~LogEntry~~ query(LogQuery query)
+        +Future~void~ exportLogs(String filePath, LogExportFormat format)
+        +Future~void~ archiveAndClean()
+        +Future~LogStats~ getStats()
+        +Stream~LogEntry~~ observeLogs(LogQuery? query)
+    }
+
+    class LogService {
+        -LogRepository _repository
+        -LogCleanupWorker _cleanupWorker
+        -int _maxEntries
+        -int _maxSizeBytes
+        +LogService()
+        +all methods from ILogService
+        -_checkLimits()
+    }
+
+    class LogCleanupWorker {
+        -int _maxEntries
+        -int _maxSizeBytes
+        -LogRepository _repository
+        +checkAndCleanup() Future~void~
+        -_archiveOldLogs() Future~String?
+        -_deleteOldest(int count) Future~void~
+    }
+
+    class LogQuery {
+        +LogEventType? eventType
+        +String? deviceId
+        +DateTime? startTime
+        +DateTime? endTime
+        +String? searchText
+        +int? limit
+        +int? offset
+        +LogSortField sortField
+        +SortOrder sortOrder
+    }
+
+    class LogStats {
+        +int totalEntries
+        +int totalSizeBytes
+        +DateTime oldestEntry
+        +DateTime newestEntry
+        +Map~LogEventType,int~ typeDistribution
+    }
+
+    class LogExportFormat {
+        <<enumeration>>
+        TXT
+        CSV
+        JSON
+    }
+
+    class LogSortField {
+        <<enumeration>>
+        TIMESTAMP
+        EVENT_TYPE
+        DEVICE_NAME
+    }
+
+    %% ========== Platform Abstraction ==========
+    class IPlatformHelper {
+        <<interface>>
+        +Future~bool~ requestBluetoothPermissions()
+        +Future~bool~ requestLocationPermissions()
+        +Future~bool~ isBluetoothEnabled()
+        +Future~bool~ enableBluetooth()
+        +Future~bool~ isLocationEnabled()
+        +Future~String~ getDeviceMacAddress()
+        +Future~String~ getAppDocumentsPath()
+        +Future~String~ getAppCachePath()
+        +Future~bool~ isAndroid()
+        +Future~bool~ isIOS()
+    }
+
+    class AndroidPlatformHelper {
+        +all methods from IPlatformHelper
+        -_checkAndroid12Permissions()
+        -_checkAndroid10Permissions()
+    }
+
+    class IosPlatformStub {
+        <<stub>>
+        +all methods from IPlatformHelper
+        -throws UnsupportedError
+    }
+
+    %% ========== Repositories ==========
+    class DeviceRepository {
+        -AppDatabase _db
+        +getFavoriteDevices() Future~List~BleDevice~~
+        +addFavorite(BleDevice device) Future~void~
+        +removeFavorite(String deviceId) Future~void~
+        +isFavorite(String deviceId) Future~bool~
+        +getConnectionHistory() Future~List~BleDevice~~
+        +recordConnection(BleDevice device) Future~void~
+    }
+
+    class LogRepository {
+        -AppDatabase _db
+        +insert(LogEntry entry) Future~int~
+        +batchInsert(List~LogEntry~ entries) Future~void~
+        +query(LogQuery query) Future~List~LogEntry~~
+        +watchEntries(LogQuery? query) Stream~List~LogEntry~~
+        +deleteOlderThan(DateTime threshold) Future~int~
+        +deleteOldest(int count) Future~int~
+        +count() Future~int~
+        +totalSize() Future~int~
+        +deleteAll() Future~int~
+    }
+
+    class SettingsRepository {
+        -SharedPreferences _prefs
+        +getSettings() Future~AppSettings~
+        +saveSettings(AppSettings settings) Future~void~
+        +getThemeMode() ThemeMode
+        +setThemeMode(ThemeMode mode)
+        +getDefaultFormat() DataDisplayFormat
+        +setDefaultFormat(DataDisplayFormat format)
+    }
+
+    %% ========== Relationships ==========
+    IBleService <|.. BleService : implements
+    BleDeviceManager --> IBleService : uses
+    BleDeviceManager --> BleGattOperator : manages
+    BleGattOperator --> IBleService : uses
+
+    IDfuAdapter <|.. NordicDfuAdapter : implements
+    DfuManager --> IDfuAdapter : manages
+
+    ILogService <|.. LogService : implements
+    LogService --> LogRepository : uses
+    LogService --> LogCleanupWorker : uses
+    LogCleanupWorker --> LogRepository : uses
+
+    IPlatformHelper <|.. AndroidPlatformHelper : implements
+    IPlatformHelper <|.. IosPlatformStub : implements
+
+---
+title: BLoC 状态管理
+---
+classDiagram
+    direction TB
+
+    %% ========== Scan BLoC ==========
+    class ScanBloc {
+        -IBleService _bleService
+        -ILogService _logService
+        +ScanBloc()
+        +onScanStarted(ScanStarted event) void
+        +onScanStopped(ScanStopped event) void
+        +onFilterChanged(FilterChanged event) void
+    }
+
+    class ScanState {
+        +List~BleDevice~ devices
+        +bool isScanning
+        +ScanFilter filter
+        +ScanStatus status
+        +String? errorMessage
+        +copyWith(...)
+    }
+
+    class ScanEvent {
+        <<abstract>>
+    }
+
+    class ScanStarted {
+        +ScanFilter filter
+    }
+
+    class ScanStopped {}
+    class FilterChanged {
+        +ScanFilter filter
+    }
+    class ScanDeviceFound {
+        +BleDevice device
+    }
+    class ScanError {
+        +String message
+    }
+
+    %% ========== Device BLoC ==========
+    class DeviceBloc {
+        -IBleService _bleService
+        -ILogService _logService
+        -DeviceRepository _deviceRepo
+        +DeviceBloc(String deviceId)
+        +onConnectRequested(ConnectRequested event) void
+        +onDisconnectRequested(DisconnectRequested event) void
+        +onMtuRequested(MtuRequested event) void
+        +onRssiUpdated(RssiUpdated event) void
+    }
+
+    class DeviceState {
+        +String deviceId
+        +ConnectionState connectionState
+        +int rssi
+        +int mtu
+        +ConnectionParams? connectionParams
+        +String? errorMessage
+        +copyWith(...)
+    }
+
+    %% ========== GATT BLoC ==========
+    class GattBloc {
+        -IBleService _bleService
+        -ILogService _logService
+        -BleGattOperator _gattOperator
+        +GattBloc(String deviceId)
+        +onDiscoverServices(DiscoverServices event) void
+        +onReadCharacteristic(ReadCharacteristic event) void
+        +onWriteCharacteristic(WriteCharacteristic event) void
+        +onToggleNotify(ToggleNotify event) void
+        +onReadDescriptor(ReadDescriptor event) void
+    }
+
+    class GattState {
+        +List~BleServiceInfo~ services
+        +bool isLoadingServices
+        +Map~String, CharacteristicState~ characteristicStates
+        +DataDisplayFormat displayFormat
+        +String? errorMessage
+        +copyWith(...)
+    }
+
+    class CharacteristicState {
+        +List~int~? value
+        +bool isReading
+        +bool isWriting
+        +bool isNotifying
+        +bool isIndicating
+        +List~List~int~~ notifyHistory
+    }
+
+    %% ========== Log BLoC ==========
+    class LogBloc {
+        -ILogService _logService
+        +LogBloc()
+        +onLogsRequested(LogsRequested event) void
+        +onLogFilterChanged(LogFilterChanged event) void
+        +onExportRequested(ExportRequested event) void
+        +onClearLogs(ClearLogs event) void
+    }
+
+    class LogState {
+        +List~LogEntry~ entries
+        +LogQuery query
+        +LogExportStatus exportStatus
+        +LogStats? stats
+        +String? exportFilePath
+        +copyWith(...)
+    }
+
+    %% ========== Settings BLoC ==========
+    class SettingsBloc {
+        -SettingsRepository _settingsRepo
+        +SettingsBloc()
+        +onSettingsLoaded(SettingsLoaded event) void
+        +onThemeChanged(ThemeChanged event) void
+        +onFormatChanged(FormatChanged event) void
+        +onScanDurationChanged(ScanDurationChanged event) void
+    }
+
+    class SettingsState {
+        +AppSettings settings
+        +bool isLoaded
+        +copyWith(...)
+    }
+
+    %% ========== DFU BLoC ==========
+    class DfuBloc {
+        -DfuManager _dfuManager
+        -ILogService _logService
+        +DfuBloc()
+        +onFirmwareSelected(FirmwareSelected event) void
+        +onDfuStarted(DfuStarted event) void
+        +onDfuAborted(DfuAborted event) void
+    }
+
+    class DfuState {
+        +DfuFirmware? firmware
+        +DfuProcessState processState
+        +int progressPercent
+        +String? errorMessage
+        +copyWith(...)
+    }
+
+    class DfuProcessState {
+        <<enumeration>>
+        IDLE
+        READY
+        IN_PROGRESS
+        COMPLETED
+        FAILED
+    }
+
+    %% ========== Event/State Inheritance ==========
+    ScanEvent <|-- ScanStarted
+    ScanEvent <|-- ScanStopped
+    ScanEvent <|-- FilterChanged
+    ScanEvent <|-- ScanDeviceFound
+    ScanEvent <|-- ScanError

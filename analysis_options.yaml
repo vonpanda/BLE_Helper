@@ -1,0 +1,29 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - avoid_print
+    - prefer_single_quotes
+    - sort_child_properties_last
+    - use_key_in_widget_constructors
+    - prefer_const_literals_to_create_immutables
+    - avoid_unnecessary_containers
+    - prefer_final_locals
+    - unnecessary_this
+    - always_declare_return_types
+    - annotate_overrides
+    - avoid_init_to_null
+    - curly_braces_in_flow_control_structures
+    - prefer_relative_imports
+    - constant_identifier_names: false
+
+analyzer:
+  errors:
+    missing_return: error
+    dead_code: warning
+    constant_identifier_names: ignore
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"

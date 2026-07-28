@@ -1,0 +1,243 @@
+sequenceDiagram
+    actor User as 用户
+    participant SPage as ScanScreen
+    participant SBloc as ScanBloc
+    participant BleSvc as BleService
+    participant FBP as FlutterBluePlus
+    participant BLE as BLE Device
+    participant DBloc as DeviceBloc
+    participant GBloc as GattBloc
+    participant DPage as DeviceDetailScreen
+    participant CPage as CharacteristicScreen
+    participant LogSvc as LogService
+    participant DB as Database
+
+    %% ====== 扫描阶段 ======
+    User->>SPage: 进入App / 点击"扫描"
+    SPage->>SBloc: add(ScanStarted(filter))
+    SBloc->>BleSvc: scanDevices(filter)
+    BleSvc->>FBP: startScan()
+    FBP-->>BLE: BLE Scan Request
+    BLE-->>FBP: ScanResult (name, MAC, RSSI, advData)
+    FBP-->>BleSvc: Stream~ScanResult~
+    BleSvc-->>SBloc: Stream~List~BleDevice~~
+    SBloc->>SBloc: 按 filter 排序/过滤
+    SBloc-->>SPage: emit(ScanState with devices)
+
+    opt 记录扫描日志
+        SBloc->>LogSvc: log(SCAN_DEVICE_FOUND)
+        LogSvc->>DB: insert(LogEntry)
+    end
+
+    %% ====== 连接阶段 ======
+    User->>SPage: 点击设备列表项
+    SPage->>SBloc: add(ScanStopped)
+    SBloc->>BleSvc: stopScan()
+    SPage->>DPage: navigate(deviceId)
+
+    DPage->>DBloc: add(ConnectRequested(deviceId))
+    DBloc->>BleSvc: connect(deviceId)
+    BleSvc->>FBP: device.connect()
+    FBP-->>BLE: BLE Connect Request
+    BLE-->>FBP: Connected
+    FBP-->>BleSvc: connection established
+    BleSvc-->>DBloc: ConnectionState.connected
+    DBloc->>LogSvc: log(DEVICE_CONNECTED)
+    DBloc-->>DPage: emit(DeviceState connected)
+
+    %% ====== RSSI 监测 ======
+    DBloc->>BleSvc: observeRssi(deviceId)
+    loop 持续更新 RSSI
+        BleSvc-->>DBloc: Stream~int~ rssi
+        DBloc-->>DPage: emit(rssi updated)
+    end
+
+    %% ====== GATT 服务发现 ======
+    DPage->>GBloc: add(DiscoverServices(deviceId))
+    GBloc->>BleSvc: discoverServices(deviceId)
+    BleSvc->>FBP: device.discoverServices()
+    FBP-->>BLE: Service Discovery
+    BLE-->>FBP: List~BluetoothService~
+    FBP-->>BleSvc: List~Service + Characteristics~
+    BleSvc-->>GBloc: List~BleServiceInfo~
+    GBloc->>GBloc: 构建 Service 树
+    GBloc-->>DPage: emit(GattState with services)
+    DPage->>DPage: 渲染 GATT 服务树
+
+    %% ====== Characteristic 交互 ======
+    User->>DPage: 点击某个 Characteristic
+    DPage->>CPage: navigate(deviceId, serviceUuid, charUuid)
+
+    %% Read
+    User->>CPage: 点击"Read"
+    CPage->>GBloc: add(ReadCharacteristic(...))
+    GBloc->>BleSvc: readCharacteristic(...)
+    BleSvc->>FBP: characteristic.read()
+    FBP-->>BLE: Read Request
+    BLE-->>FBP: List~int~ value
+    FBP-->>BleSvc: result
+    BleSvc-->>GBloc: List~int~
+    GBloc->>LogSvc: log(GATT_READ, value)
+    GBloc-->>CPage: emit(CharacteristicState with value)
+
+    %% Write
+    User->>CPage: 输入数据 → 点击"Write"
+    CPage->>GBloc: add(WriteCharacteristic(data, withResponse:true))
+    GBloc->>BleSvc: writeCharacteristic(data, withResponse)
+    BleSvc->>FBP: characteristic.write(data)
+    FBP-->>BLE: Write Request
+    BLE-->>FBP: Write Response
+    GBloc->>LogSvc: log(GATT_WRITE, data)
+
+    %% Notify
+    User->>CPage: 打开 Notify 开关
+    CPage->>GBloc: add(ToggleNotify(enable:true))
+    GBloc->>BleSvc: setNotify(enable:true)
+    BleSvc->>FBP: characteristic.setNotify(true)
+    loop 持续接收通知
+        BLE-->>FBP: Notification (value)
+        FBP-->>BleSvc: List~int~
+        BleSvc-->>GBloc: Stream~List~int~~
+        GBloc->>LogSvc: log(GATT_NOTIFY, value)
+        GBloc-->>CPage: emit(notifyHistory updated)
+    end
+
+---
+title: 日志导出流程
+---
+sequenceDiagram
+    actor User as 用户
+    participant LS as LogScreen
+    participant LBloc as LogBloc
+    participant LogSvc as LogService
+    participant LR as LogRepository
+    participant DB as Database
+    participant Util as FileUtils
+    participant Share as SharePlus
+
+    User->>LS: 点击"导出日志"
+    LS->>LS: 弹出格式选择弹窗
+    User->>LS: 选择 TXT + 全部分类
+    LS->>LBloc: add(ExportRequested(format:TXT, query:...))
+
+    LBloc->>LogSvc: exportLogs(path, format)
+    LogSvc->>LR: query(query)
+    LR->>DB: SELECT * FROM logs WHERE ...
+    DB-->>LR: List~LogEntry~
+    LR-->>LogSvc: List~LogEntry~
+
+    alt format == TXT
+        LogSvc->>LogSvc: formatAsTxt(entries)
+    else format == CSV
+        LogSvc->>LogSvc: formatAsCsv(entries)
+    else format == JSON
+        LogSvc->>LogSvc: formatAsJson(entries)
+    end
+
+    LogSvc->>Util: writeFile(path, content)
+    Util-->>LogSvc: file written
+    LogSvc-->>LBloc: exportFilePath
+    LBloc-->>LS: emit(ExportStatus.completed, filePath)
+
+    LS->>Share: shareXFiles([XFile(path)])
+    Share-->>User: 系统分享面板
+
+---
+title: 日志自动清理流程
+---
+sequenceDiagram
+    participant App as App启动
+    participant LogSvc as LogService
+    participant Worker as LogCleanupWorker
+    participant LR as LogRepository
+    participant DB as Database
+    participant Util as FileUtils
+
+    App->>LogSvc: 初始化
+    LogSvc->>Worker: checkAndCleanup()
+
+    Worker->>LR: count()
+    LR->>DB: SELECT COUNT(*) FROM logs
+    DB-->>LR: totalEntries
+    LR-->>Worker: 95,000
+
+    Worker->>LR: totalSize()
+    LR->>DB: 估算总大小
+    DB-->>LR: 85MB
+    LR-->>Worker: 85MB
+
+    Note over Worker: 检查限制: maxEntries=100,000 / maxSize=100MB
+
+    alt 超过上限 (≥100,000 条或 ≥100MB)
+        Worker->>Worker: 计算需要归档的数量
+
+        Worker->>LR: query(最旧的归档批次)
+        LR->>DB: SELECT ... ORDER BY timestamp ASC LIMIT ...
+        DB-->>Worker: 旧日志列表
+
+        Worker->>Util: writeFile(archivePath, formatted)
+        Util-->>Worker: 归档文件已生成
+
+        Worker->>LR: deleteOlderThan(threshold)
+        LR->>DB: DELETE FROM logs WHERE timestamp < ...
+        DB-->>Worker: deleted count
+
+        Worker->>Worker: 发出归档成功通知
+    else 未超上限
+        Worker-->>LogSvc: 无需清理
+    end
+
+---
+title: DFU 固件升级流程
+---
+sequenceDiagram
+    actor User as 用户
+    participant DS as DfuScreen
+    participant DBloc as DfuBloc
+    participant Mgr as DfuManager
+    participant Adapter as NordicDfuAdapter
+    participant NDFU as FlutterNordicDFU
+    participant BLE as BLE Device
+    participant LogSvc as LogService
+
+    User->>DS: 选择 .zip 固件文件
+    DS->>DBloc: add(FirmwareSelected(filePath))
+    DBloc->>DBloc: 解析固件 → 识别 Nordic 芯片类型
+    DBloc->>Mgr: getAdapterFor(NORDIC)
+    Mgr-->>DBloc: NordicDfuAdapter
+    DBloc-->>DS: emit(DfuState.ready)
+
+    User->>DS: 点击"开始升级"
+    DS->>DBloc: add(DfuStarted(deviceId, firmware))
+    DBloc->>LogSvc: log(DFU_STARTED)
+    DBloc->>Mgr: startDfu(deviceId, firmware)
+    Mgr->>Adapter: startDfu(deviceId, firmware)
+
+    Adapter->>NDFU: startDfu(deviceId, filePath)
+    NDFU-->>BLE: DFU Service 交互
+    BLE-->>NDFU: 进入 Bootloader 模式
+
+    loop 固件传输
+        BLE-->>NDFU: 进度回调 (percent, bytesSent)
+        NDFU-->>Adapter: onProgress
+        Adapter-->>Mgr: progress stream
+        Mgr-->>DBloc: 进度更新
+        DBloc->>LogSvc: log(DFU_PROGRESS, percent)
+        DBloc-->>DS: emit(progress updated)
+    end
+
+    BLE-->>NDFU: 传输完成 → 验证
+    NDFU-->>Adapter: onCompleted
+    Adapter-->>Mgr: completed
+    Mgr-->>DBloc: completed
+    DBloc->>LogSvc: log(DFU_COMPLETED)
+    DBloc-->>DS: emit(DfuState.completed)
+
+    opt 升级失败
+        BLE-->>NDFU: 错误
+        NDFU-->>Adapter: onError
+        Adapter-->>Mgr: error
+        Mgr-->>DBloc: error
+        DBloc->>LogSvc: log(DFU_ERROR)
+        DBloc-->>DS: emit(DfuState.failed, errorMessage)
+    end

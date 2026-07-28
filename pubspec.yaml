@@ -1,0 +1,65 @@
+name: ble_helper
+description: BLE Bluetooth Helper App — scan, connect, GATT interact, and DFU upgrade.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+  flutter: ^3.22.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_bloc: ^8.1.6
+  bloc: ^8.1.4
+
+  # BLE Core
+  flutter_blue_plus: ^1.32.13
+
+  # DFU adapters can integrate platform-specific packages as needed.
+  # flutter_nordic_dfu: ^6.1.0
+
+  # Database
+  drift: ^2.22.1
+  sqlite3_flutter_libs: ^0.5.26
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # DI
+  get_it: ^8.0.3
+
+  # Router
+  go_router: ^14.6.2
+
+  # Charts
+  fl_chart: ^0.68.0
+
+  # File Sharing & Export
+  share_plus: ^10.1.4
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # Storage
+  shared_preferences: ^2.3.4
+
+  # Utilities
+  uuid: ^4.5.1
+  collection: ^1.19.0
+  equatable: ^2.0.7
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  drift_dev: ^2.22.1
+  build_runner: ^2.4.13
+  bloc_test: ^9.1.7
+  mockito: ^5.4.4
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
