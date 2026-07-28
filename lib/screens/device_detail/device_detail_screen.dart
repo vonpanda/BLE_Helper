@@ -10,6 +10,7 @@ import '../../bloc/gatt/gatt_event.dart';
 import '../../bloc/gatt/gatt_state.dart';
 import '../../core/di/injection_container.dart';
 import '../../core/constants/ui_constants.dart';
+import '../../services/ble/ble_service_interface.dart' as ble;
 import '../../widgets/connection_status_badge.dart';
 import '../../widgets/loading_indicator.dart';
 import '../../widgets/empty_state.dart';
@@ -36,12 +37,6 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    // Connect to device and discover services
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DeviceBloc>().add(
-            ConnectRequested(deviceId: widget.deviceId),
-          );
-    });
   }
 
   @override
@@ -55,7 +50,8 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
     return MultiBlocProvider(
       providers: [
         BlocProvider<DeviceBloc>(
-          create: (_) => sl<DeviceBloc>(param1: widget.deviceId),
+          create: (_) => sl<DeviceBloc>(param1: widget.deviceId)
+            ..add(ConnectRequested(deviceId: widget.deviceId)),
         ),
         BlocProvider<GattBloc>(
           create: (_) => sl<GattBloc>(param1: widget.deviceId),
@@ -109,43 +105,55 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
                 controller: _tabController,
                 children: [
                   // Services tab
-                  BlocBuilder<GattBloc, GattState>(
-                    builder: (BuildContext context, GattState gattState) {
-                      if (gattState.isLoadingServices) {
-                        return const LoadingIndicator(
-                            message: 'Discovering services...');
-                      }
-                      if (gattState.services.isEmpty) {
-                        return const EmptyState(
-                          icon: Icons.device_hub,
-                          title: 'No Services',
-                          subtitle:
-                              'Connect to a device to discover GATT services.',
+                  _DeviceTabPage(
+                    connectionPanel: _ConnectionPanel(state: deviceState),
+                    child: BlocBuilder<GattBloc, GattState>(
+                      builder: (BuildContext context, GattState gattState) {
+                        if (gattState.isLoadingServices) {
+                          return const LoadingIndicator(
+                              message: 'Discovering services...');
+                        }
+                        if (gattState.services.isEmpty) {
+                          return const EmptyState(
+                            icon: Icons.device_hub,
+                            title: 'No Services',
+                            subtitle:
+                                'Connect to a device to discover GATT services.',
+                          );
+                        }
+                        return GattServiceTree(
+                          services: gattState.services,
+                          deviceId: widget.deviceId,
                         );
-                      }
-                      return GattServiceTree(
-                        services: gattState.services,
-                        deviceId: widget.deviceId,
-                      );
-                    },
+                      },
+                    ),
                   ),
 
                   // RSSI tab
-                  BlocBuilder<DeviceBloc, DeviceState>(
-                    builder: (BuildContext context, DeviceState state) {
-                      return RssiChart(rssi: state.rssi);
-                    },
+                  _DeviceTabPage(
+                    connectionPanel: _ConnectionPanel(state: deviceState),
+                    child: BlocBuilder<DeviceBloc, DeviceState>(
+                      builder: (BuildContext context, DeviceState state) {
+                        return RssiChart(rssi: state.rssi);
+                      },
+                    ),
                   ),
 
                   // Info tab
-                  BlocBuilder<DeviceBloc, DeviceState>(
-                    builder: (BuildContext context, DeviceState state) {
-                      return DeviceInfoCard(state: state);
-                    },
+                  _DeviceTabPage(
+                    connectionPanel: _ConnectionPanel(state: deviceState),
+                    child: BlocBuilder<DeviceBloc, DeviceState>(
+                      builder: (BuildContext context, DeviceState state) {
+                        return DeviceInfoCard(state: state);
+                      },
+                    ),
                   ),
 
                   // Logs tab
-                  DeviceLogList(deviceId: widget.deviceId),
+                  _DeviceTabPage(
+                    connectionPanel: _ConnectionPanel(state: deviceState),
+                    child: DeviceLogList(deviceId: widget.deviceId),
+                  ),
                 ],
               ),
             ),
@@ -154,4 +162,169 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
       ),
     );
   }
+}
+
+class _DeviceTabPage extends StatelessWidget {
+  final Widget connectionPanel;
+  final Widget child;
+
+  const _DeviceTabPage({
+    required this.connectionPanel,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        connectionPanel,
+        Expanded(child: child),
+      ],
+    );
+  }
+}
+
+class _ConnectionPanel extends StatelessWidget {
+  final DeviceState state;
+
+  const _ConnectionPanel({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final _ConnectionPanelStyle style = _styleFor(theme);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(UiConstants.spacingMd),
+      padding: const EdgeInsets.all(UiConstants.spacingMd),
+      decoration: BoxDecoration(
+        color: style.background,
+        borderRadius: BorderRadius.circular(UiConstants.radiusMd),
+        border: Border.all(color: style.border),
+      ),
+      child: Row(
+        children: [
+          if (state.connectionState == ble.ConnectionState.connecting)
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: style.foreground,
+              ),
+            )
+          else
+            Icon(style.icon, color: style.foreground),
+          const SizedBox(width: UiConstants.spacingMd),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  style.title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: style.foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  state.errorMessage ?? style.subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: style.foreground.withValues(alpha: 0.84),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (state.isConnected) ...[
+            const SizedBox(width: UiConstants.spacingMd),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${state.rssi} dBm',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: style.foreground,
+                    fontFeatures: const [],
+                  ),
+                ),
+                Text(
+                  'MTU ${state.mtu}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: style.foreground.withValues(alpha: 0.78),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  _ConnectionPanelStyle _styleFor(ThemeData theme) {
+    switch (state.connectionState) {
+      case ble.ConnectionState.connected:
+        return _ConnectionPanelStyle(
+          icon: Icons.bluetooth_connected,
+          title: 'Connected',
+          subtitle: 'GATT services are available below.',
+          foreground: theme.colorScheme.onPrimaryContainer,
+          background: theme.colorScheme.primaryContainer,
+          border: theme.colorScheme.primary.withValues(alpha: 0.35),
+        );
+      case ble.ConnectionState.connecting:
+        return _ConnectionPanelStyle(
+          icon: Icons.bluetooth_searching,
+          title: 'Connecting',
+          subtitle: 'Opening BLE connection and preparing GATT discovery.',
+          foreground: theme.colorScheme.onSecondaryContainer,
+          background: theme.colorScheme.secondaryContainer,
+          border: theme.colorScheme.secondary.withValues(alpha: 0.35),
+        );
+      case ble.ConnectionState.disconnecting:
+        return _ConnectionPanelStyle(
+          icon: Icons.link_off,
+          title: 'Disconnecting',
+          subtitle: 'Closing the active BLE connection.',
+          foreground: theme.colorScheme.onTertiaryContainer,
+          background: theme.colorScheme.tertiaryContainer,
+          border: theme.colorScheme.tertiary.withValues(alpha: 0.35),
+        );
+      case ble.ConnectionState.disconnected:
+        return _ConnectionPanelStyle(
+          icon: Icons.bluetooth_disabled,
+          title:
+              state.errorMessage == null ? 'Disconnected' : 'Connection Failed',
+          subtitle: 'Tap another device from the scanner to connect.',
+          foreground: theme.colorScheme.onErrorContainer,
+          background: theme.colorScheme.errorContainer,
+          border: theme.colorScheme.error.withValues(alpha: 0.35),
+        );
+    }
+  }
+}
+
+class _ConnectionPanelStyle {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color foreground;
+  final Color background;
+  final Color border;
+
+  const _ConnectionPanelStyle({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.foreground,
+    required this.background,
+    required this.border,
+  });
 }

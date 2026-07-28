@@ -28,6 +28,7 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     on<ScanStarted>(_onScanStarted);
     on<ScanStopped>(_onScanStopped);
     on<FilterChanged>(_onFilterChanged);
+    on<ScanResultsReceived>(_onScanResultsReceived);
     on<ScanError>(_onScanError);
   }
 
@@ -36,10 +37,11 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     Emitter<ScanState> emit,
   ) async {
     if (state.isScanning) {
-      _stopScan();
+      await _stopScan();
     }
 
     emit(state.copyWith(
+      devices: event.clearResults ? const <BleDevice>[] : state.devices,
       isScanning: true,
       filter: event.filter,
       status: ScanStatus.scanning,
@@ -55,73 +57,10 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
         add(const ScanStopped());
       });
 
-      _scanSubscription?.cancel();
+      await _scanSubscription?.cancel();
       _scanSubscription = _bleService.scanDevices(filter: event.filter).listen(
         (List<BleDevice> devices) {
-          List<BleDevice> filtered = List<BleDevice>.from(devices);
-
-          // Apply name filter on client side
-          if (event.filter.nameFilter != null &&
-              event.filter.nameFilter!.isNotEmpty) {
-            final String query = event.filter.nameFilter!.toLowerCase();
-            filtered = filtered
-                .where((d) => d.name.toLowerCase().contains(query))
-                .toList();
-          }
-
-          // Apply RSSI filter
-          if (event.filter.rssiMin != null) {
-            filtered =
-                filtered.where((d) => d.rssi >= event.filter.rssiMin!).toList();
-          }
-
-          // Sort
-          switch (event.filter.sortBy) {
-            case SortBy.RSSI:
-              filtered.sort((a, b) => b.rssi.compareTo(a.rssi));
-              break;
-            case SortBy.NAME:
-              filtered.sort((a, b) => a.name.compareTo(b.name));
-              break;
-            case SortBy.LAST_SEEN:
-              filtered.sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
-              break;
-          }
-
-          if (event.filter.sortOrder == SortOrder.ASC) {
-            filtered = filtered.reversed.toList();
-          }
-
-          for (final BleDevice device in filtered) {
-            // Merge with existing if same ID
-            final int existingIdx =
-                state.devices.indexWhere((d) => d.id == device.id);
-            if (existingIdx >= 0) {
-              final List<BleDevice> updated =
-                  List<BleDevice>.from(state.devices);
-              updated[existingIdx] = device.copyWith(
-                rssi: device.rssi,
-                lastSeen: DateTime.now(),
-              );
-              emit(state.copyWith(devices: updated));
-            } else {
-              emit(state.copyWith(devices: [...state.devices, device]));
-            }
-
-            // Log device found (throttled: only log first time per device)
-            if (existingIdx < 0) {
-              _logService.log(
-                LogEntry(
-                  timestamp: DateTime.now(),
-                  deviceId: device.id,
-                  deviceName: device.name,
-                  eventType: LogEventType.SCAN_DEVICE_FOUND,
-                  description:
-                      'Device found: ${device.name} (RSSI: ${device.rssi})',
-                ),
-              );
-            }
-          }
+          add(ScanResultsReceived(devices: devices));
         },
         onError: (Object error) {
           add(ScanError(message: error.toString()));
@@ -136,8 +75,54 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     }
   }
 
-  void _onScanStopped(ScanStopped event, Emitter<ScanState> emit) {
-    _stopScan();
+  Future<void> _onScanResultsReceived(
+    ScanResultsReceived event,
+    Emitter<ScanState> emit,
+  ) async {
+    final List<BleDevice> filtered = _applyFilterAndSort(
+      event.devices,
+      state.filter,
+    );
+    final List<BleDevice> merged = List<BleDevice>.from(state.devices);
+    final List<LogEntry> newDeviceLogs = [];
+
+    for (final BleDevice device in filtered) {
+      final int existingIdx = merged.indexWhere((d) => d.id == device.id);
+      if (existingIdx >= 0) {
+        merged[existingIdx] = device.copyWith(
+          rssi: device.rssi,
+          lastSeen: DateTime.now(),
+        );
+      } else {
+        merged.add(device);
+        newDeviceLogs.add(
+          LogEntry(
+            timestamp: DateTime.now(),
+            deviceId: device.id,
+            deviceName: device.name,
+            eventType: LogEventType.SCAN_DEVICE_FOUND,
+            description: 'Device found: ${device.name} (RSSI: ${device.rssi})',
+          ),
+        );
+      }
+    }
+
+    emit(state.copyWith(
+      devices: _applyFilterAndSort(merged, state.filter),
+      isScanning: true,
+      status: ScanStatus.scanning,
+    ));
+
+    for (final LogEntry logEntry in newDeviceLogs) {
+      await _logService.log(logEntry);
+    }
+  }
+
+  Future<void> _onScanStopped(
+    ScanStopped event,
+    Emitter<ScanState> emit,
+  ) async {
+    await _stopScan();
     emit(state.copyWith(
       isScanning: false,
       status: ScanStatus.idle,
@@ -146,19 +131,10 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
 
   void _onFilterChanged(FilterChanged event, Emitter<ScanState> emit) {
     // Apply filter to existing devices without restarting scan
-    List<BleDevice> filtered = List<BleDevice>.from(state.devices);
-
-    if (event.filter.nameFilter != null &&
-        event.filter.nameFilter!.isNotEmpty) {
-      final String query = event.filter.nameFilter!.toLowerCase();
-      filtered =
-          filtered.where((d) => d.name.toLowerCase().contains(query)).toList();
-    }
-
-    if (event.filter.rssiMin != null) {
-      filtered =
-          filtered.where((d) => d.rssi >= event.filter.rssiMin!).toList();
-    }
+    final List<BleDevice> filtered = _applyFilterAndSort(
+      state.devices,
+      event.filter,
+    );
 
     emit(state.copyWith(
       filter: event.filter,
@@ -173,17 +149,51 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     ));
   }
 
-  void _stopScan() {
+  List<BleDevice> _applyFilterAndSort(
+    List<BleDevice> devices,
+    ScanFilter filter,
+  ) {
+    List<BleDevice> filtered = List<BleDevice>.from(devices);
+
+    if (filter.nameFilter != null && filter.nameFilter!.isNotEmpty) {
+      final String query = filter.nameFilter!.toLowerCase();
+      filtered =
+          filtered.where((d) => d.name.toLowerCase().contains(query)).toList();
+    }
+
+    if (filter.rssiMin != null) {
+      filtered = filtered.where((d) => d.rssi >= filter.rssiMin!).toList();
+    }
+
+    switch (filter.sortBy) {
+      case SortBy.RSSI:
+        filtered.sort((a, b) => b.rssi.compareTo(a.rssi));
+        break;
+      case SortBy.NAME:
+        filtered.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case SortBy.LAST_SEEN:
+        filtered.sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+        break;
+    }
+
+    if (filter.sortOrder == SortOrder.ASC) {
+      return filtered.reversed.toList();
+    }
+    return filtered;
+  }
+
+  Future<void> _stopScan() async {
     _scanTimer?.cancel();
     _scanTimer = null;
-    _scanSubscription?.cancel();
+    await _scanSubscription?.cancel();
     _scanSubscription = null;
-    _bleService.stopScan();
+    await _bleService.stopScan();
   }
 
   @override
-  Future<void> close() {
-    _stopScan();
+  Future<void> close() async {
+    await _stopScan();
     return super.close();
   }
 }

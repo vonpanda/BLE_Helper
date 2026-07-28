@@ -32,8 +32,6 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('BLE Helper'),
@@ -58,38 +56,43 @@ class _ScanScreenState extends State<ScanScreen> {
       body: BlocBuilder<ScanBloc, ScanState>(
         builder: (BuildContext context, ScanState state) {
           if (state.status == ScanStatus.error && state.devices.isEmpty) {
-            return ErrorState(
-              message: state.errorMessage ?? 'Scan error',
-              retryLabel: 'Retry',
-              onRetry: () {
-                context.read<ScanBloc>().add(const ScanStarted());
-              },
+            return _RefreshableScanBody(
+              onRefresh: () => _restartScan(context),
+              child: ErrorState(
+                message: state.errorMessage ?? 'Scan error',
+                retryLabel: 'Retry',
+                onRetry: () {
+                  context.read<ScanBloc>().add(ScanStarted(
+                        filter: context.read<ScanBloc>().state.filter,
+                      ));
+                },
+              ),
             );
           }
 
           if (!state.isScanning && state.devices.isEmpty) {
-            return EmptyState(
-              icon: Icons.bluetooth_searching,
-              title: 'No devices found',
-              subtitle:
-                  'Press the scan button to start searching for BLE devices.',
-              actionLabel: 'Start Scan',
-              onAction: () {
-                context.read<ScanBloc>().add(const ScanStarted());
-              },
+            return _RefreshableScanBody(
+              onRefresh: () => _restartScan(context),
+              child: const EmptyState(
+                icon: Icons.bluetooth_searching,
+                title: 'No devices found',
+                subtitle: 'Pull down to scan again for nearby BLE devices.',
+              ),
             );
           }
 
           if (state.devices.isEmpty && state.isScanning) {
-            return const LoadingIndicator(message: 'Scanning for devices...');
+            return _RefreshableScanBody(
+              onRefresh: () => _restartScan(context),
+              child: const LoadingIndicator(message: 'Scanning for devices...'),
+            );
           }
 
           return RefreshIndicator(
-            onRefresh: () async {
-              context.read<ScanBloc>().add(const ScanStarted());
-            },
+            onRefresh: () => _restartScan(context),
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
+              physics: const AlwaysScrollableScrollPhysics(),
               itemCount: state.devices.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {
@@ -110,27 +113,13 @@ class _ScanScreenState extends State<ScanScreen> {
           );
         },
       ),
-      floatingActionButton: BlocBuilder<ScanBloc, ScanState>(
-        builder: (BuildContext context, ScanState state) {
-          return FloatingActionButton.extended(
-            onPressed: () {
-              if (state.isScanning) {
-                context.read<ScanBloc>().add(const ScanStopped());
-              } else {
-                context.read<ScanBloc>().add(ScanStarted(
-                      filter: state.filter,
-                    ));
-              }
-            },
-            icon: Icon(state.isScanning ? Icons.stop : Icons.play_arrow),
-            label: Text(state.isScanning ? 'Stop' : 'Scan'),
-            backgroundColor: state.isScanning
-                ? theme.colorScheme.errorContainer
-                : theme.colorScheme.primaryContainer,
-          );
-        },
-      ),
     );
+  }
+
+  Future<void> _restartScan(BuildContext context) async {
+    final ScanFilter filter = context.read<ScanBloc>().state.filter;
+    context.read<ScanBloc>().add(ScanStarted(filter: filter));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
   }
 
   void _showFilterDialog(BuildContext context) {
@@ -148,5 +137,33 @@ class _ScanScreenState extends State<ScanScreen> {
         context.read<ScanBloc>().add(FilterChanged(filter: filter));
       }
     });
+  }
+}
+
+class _RefreshableScanBody extends StatelessWidget {
+  final Widget child;
+  final Future<void> Function() onRefresh;
+
+  const _RefreshableScanBody({
+    required this.child,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(child: child),
+            ),
+          );
+        },
+      ),
+    );
   }
 }

@@ -108,6 +108,54 @@ void main() {
     );
 
     blocTest<ScanBloc, ScanState>(
+      'should clear existing devices when scan restarts',
+      build: () => ScanBloc(
+        bleService: mockBleService,
+        logService: mockLogService,
+      ),
+      seed: () => ScanState(
+        devices: [_testDevice('AA:BB')],
+        isScanning: true,
+        status: ScanStatus.scanning,
+      ),
+      setUp: () {
+        when(() => mockBleService.scanDevices(filter: any(named: 'filter')))
+            .thenAnswer((_) => const Stream<List<BleDevice>>.empty());
+      },
+      act: (bloc) => bloc.add(const ScanStarted()),
+      expect: () => [
+        const ScanState(
+          isScanning: true,
+          status: ScanStatus.scanning,
+          filter: ScanFilter(),
+        ),
+      ],
+      verify: (_) {
+        verify(() => mockBleService.stopScan()).called(2);
+      },
+    );
+
+    blocTest<ScanBloc, ScanState>(
+      'should preserve existing devices when requested',
+      build: () => ScanBloc(
+        bleService: mockBleService,
+        logService: mockLogService,
+      ),
+      seed: () => ScanState(devices: [_testDevice('AA:BB')]),
+      setUp: () {
+        when(() => mockBleService.scanDevices(filter: any(named: 'filter')))
+            .thenAnswer((_) => const Stream<List<BleDevice>>.empty());
+      },
+      act: (bloc) => bloc.add(const ScanStarted(clearResults: false)),
+      expect: () => [
+        isA<ScanState>()
+            .having((s) => s.isScanning, 'is scanning', true)
+            .having((s) => s.status, 'status', ScanStatus.scanning)
+            .having((s) => s.devices.length, 'devices length', 1),
+      ],
+    );
+
+    blocTest<ScanBloc, ScanState>(
       'should emit error state when scan throws',
       build: () => ScanBloc(
         bleService: mockBleService,
