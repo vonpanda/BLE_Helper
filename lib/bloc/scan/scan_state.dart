@@ -13,6 +13,9 @@ class ScanState extends Equatable {
   final ScanFilter filter;
   final ScanStatus status;
   final String? errorMessage;
+  final bool comparisonActive;
+  final List<String> comparisonBaselineDeviceIds;
+  final List<String> highlightedDeviceIds;
 
   const ScanState({
     this.devices = const [],
@@ -20,6 +23,9 @@ class ScanState extends Equatable {
     this.filter = const ScanFilter(),
     this.status = ScanStatus.idle,
     this.errorMessage,
+    this.comparisonActive = false,
+    this.comparisonBaselineDeviceIds = const [],
+    this.highlightedDeviceIds = const [],
   });
 
   ScanState copyWith({
@@ -28,6 +34,9 @@ class ScanState extends Equatable {
     ScanFilter? filter,
     ScanStatus? status,
     String? errorMessage,
+    bool? comparisonActive,
+    List<String>? comparisonBaselineDeviceIds,
+    List<String>? highlightedDeviceIds,
     bool clearError = false,
   }) {
     return ScanState(
@@ -36,8 +45,15 @@ class ScanState extends Equatable {
       filter: filter ?? this.filter,
       status: status ?? this.status,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      comparisonActive: comparisonActive ?? this.comparisonActive,
+      comparisonBaselineDeviceIds:
+          comparisonBaselineDeviceIds ?? this.comparisonBaselineDeviceIds,
+      highlightedDeviceIds: highlightedDeviceIds ?? this.highlightedDeviceIds,
     );
   }
+
+  bool isHighlighted(String deviceId) =>
+      highlightedDeviceIds.contains(deviceId);
 
   @override
   List<Object?> get props => [
@@ -46,5 +62,8 @@ class ScanState extends Equatable {
         filter,
         status,
         errorMessage,
+        comparisonActive,
+        comparisonBaselineDeviceIds,
+        highlightedDeviceIds,
       ];
 }

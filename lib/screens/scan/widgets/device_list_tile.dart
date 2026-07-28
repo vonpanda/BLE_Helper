@@ -9,12 +9,14 @@ import 'rssi_indicator.dart';
 /// A list tile displaying a BLE device's name, MAC, RSSI, and status.
 class DeviceListTile extends StatelessWidget {
   final BleDevice device;
+  final bool isNewSinceRefresh;
   final VoidCallback? onTap;
   final VoidCallback? onFavoriteToggle;
 
   const DeviceListTile({
     super.key,
     required this.device,
+    this.isNewSinceRefresh = false,
     this.onTap,
     this.onFavoriteToggle,
   });
@@ -42,8 +44,13 @@ class DeviceListTile extends StatelessWidget {
     }
 
     return ListTile(
+      tileColor: isNewSinceRefresh
+          ? Colors.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
       leading: CircleAvatar(
-        backgroundColor: theme.colorScheme.primaryContainer,
+        backgroundColor: isNewSinceRefresh
+            ? Colors.amber.shade200
+            : theme.colorScheme.primaryContainer,
         child: device.isConnected
             ? const Icon(
                 Icons.bluetooth_connected,
@@ -51,8 +58,10 @@ class DeviceListTile extends StatelessWidget {
                 size: 20,
               )
             : Icon(
-                Icons.bluetooth,
-                color: theme.colorScheme.onPrimaryContainer,
+                isNewSinceRefresh ? Icons.new_releases : Icons.bluetooth,
+                color: isNewSinceRefresh
+                    ? Colors.amber.shade900
+                    : theme.colorScheme.onPrimaryContainer,
                 size: 20,
               ),
       ),
@@ -99,7 +108,25 @@ class DeviceListTile extends StatelessWidget {
       ),
       trailing: device.isConnected
           ? Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant)
-          : null,
+          : isNewSinceRefresh
+              ? Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UiConstants.spacingSm,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade200,
+                    borderRadius: BorderRadius.circular(UiConstants.radiusSm),
+                  ),
+                  child: Text(
+                    'New',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.amber.shade900,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+              : null,
       onTap: onTap,
     );
   }

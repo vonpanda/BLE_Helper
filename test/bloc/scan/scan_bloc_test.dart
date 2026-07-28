@@ -156,6 +156,37 @@ void main() {
     );
 
     blocTest<ScanBloc, ScanState>(
+      'should highlight devices that appear after a comparison refresh',
+      build: () => ScanBloc(
+        bleService: mockBleService,
+        logService: mockLogService,
+      ),
+      seed: () => ScanState(devices: [_testDevice('AA:BB')]),
+      setUp: () {
+        when(() => mockBleService.scanDevices(filter: any(named: 'filter')))
+            .thenAnswer((_) => const Stream<List<BleDevice>>.empty());
+      },
+      act: (bloc) {
+        bloc
+          ..add(const ScanStarted(compareWithCurrentResults: true))
+          ..add(ScanResultsReceived(
+            devices: [_testDevice('AA:BB'), _testDevice('CC:DD')],
+          ));
+      },
+      expect: () => [
+        isA<ScanState>()
+            .having((s) => s.devices, 'devices cleared', isEmpty)
+            .having((s) => s.comparisonActive, 'comparison active', true)
+            .having((s) => s.comparisonBaselineDeviceIds, 'baseline ids',
+                ['AA:BB']),
+        isA<ScanState>()
+            .having((s) => s.devices.length, 'devices length', 2)
+            .having((s) => s.isHighlighted('AA:BB'), 'existing device', false)
+            .having((s) => s.isHighlighted('CC:DD'), 'new device', true),
+      ],
+    );
+
+    blocTest<ScanBloc, ScanState>(
       'should emit error state when scan throws',
       build: () => ScanBloc(
         bleService: mockBleService,

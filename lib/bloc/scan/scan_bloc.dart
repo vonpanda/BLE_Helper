@@ -40,11 +40,18 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
       await _stopScan();
     }
 
+    final List<String> baselineDeviceIds = event.compareWithCurrentResults
+        ? state.devices.map((BleDevice device) => device.id).toList()
+        : const <String>[];
+
     emit(state.copyWith(
       devices: event.clearResults ? const <BleDevice>[] : state.devices,
       isScanning: true,
       filter: event.filter,
       status: ScanStatus.scanning,
+      comparisonActive: event.compareWithCurrentResults,
+      comparisonBaselineDeviceIds: baselineDeviceIds,
+      highlightedDeviceIds: const <String>[],
       clearError: true,
     ));
 
@@ -85,6 +92,8 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     );
     final List<BleDevice> merged = List<BleDevice>.from(state.devices);
     final List<LogEntry> newDeviceLogs = [];
+    final Set<String> baselineIds = state.comparisonBaselineDeviceIds.toSet();
+    final Set<String> highlightedIds = state.highlightedDeviceIds.toSet();
 
     for (final BleDevice device in filtered) {
       final int existingIdx = merged.indexWhere((d) => d.id == device.id);
@@ -105,12 +114,17 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
           ),
         );
       }
+
+      if (state.comparisonActive && !baselineIds.contains(device.id)) {
+        highlightedIds.add(device.id);
+      }
     }
 
     emit(state.copyWith(
       devices: _applyFilterAndSort(merged, state.filter),
       isScanning: true,
       status: ScanStatus.scanning,
+      highlightedDeviceIds: highlightedIds.toList()..sort(),
     ));
 
     for (final LogEntry logEntry in newDeviceLogs) {

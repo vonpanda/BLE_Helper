@@ -98,6 +98,8 @@ class _ScanScreenState extends State<ScanScreen> {
               itemBuilder: (BuildContext context, int index) {
                 return DeviceListTile(
                   device: state.devices[index],
+                  isNewSinceRefresh:
+                      state.isHighlighted(state.devices[index].id),
                   onTap: () {
                     context.read<ScanBloc>().add(const ScanStopped());
                     context.pushNamed(
@@ -118,7 +120,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _restartScan(BuildContext context) async {
     final ScanFilter filter = context.read<ScanBloc>().state.filter;
-    context.read<ScanBloc>().add(ScanStarted(filter: filter));
+    context.read<ScanBloc>().add(ScanStarted(
+          filter: filter,
+          compareWithCurrentResults: true,
+        ));
     await Future<void>.delayed(const Duration(milliseconds: 500));
   }
 

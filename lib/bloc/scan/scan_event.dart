@@ -15,14 +15,20 @@ sealed class ScanEvent extends Equatable {
 class ScanStarted extends ScanEvent {
   final ScanFilter filter;
   final bool clearResults;
+  final bool compareWithCurrentResults;
 
   const ScanStarted({
     this.filter = const ScanFilter(),
     this.clearResults = true,
+    this.compareWithCurrentResults = false,
   });
 
   @override
-  List<Object?> get props => [filter, clearResults];
+  List<Object?> get props => [
+        filter,
+        clearResults,
+        compareWithCurrentResults,
+      ];
 }
 
 /// Stop the current scan.
